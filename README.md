@@ -1,100 +1,57 @@
-# Alarm Clock on FPGA
+# 24-Hour Alarm Clock on an FPGA
 
-An FPGA implementation of a **24-hour alarm clock**, built in **SystemVerilog** and deployed on the **Terasic DE0-CV (Cyclone V)** board.  
-This design demonstrates timekeeping, alarm functionality, LED indicators, and interactive controls via switches and keys.
+A working alarm clock in SystemVerilog, running on a Terasic DE0-CV. It keeps time, lets you set both the current time and an alarm, and blinks an LED when the two match.
 
----
+## How it keeps time
 
-## ⏰ Features
+The board has a 50 MHz oscillator and nothing else — no RTC, no crystal divider, no help. Everything is built out of a single parameterized counter module that takes a modulus and derives its own width:
 
-- **24-hour format** timekeeping (00:00 → 23:59).
-- Displays time on **HEX3–HEX0** (HH:MM format).  
-- **Current time setting**:
-  - Controlled by `SW1`.
-  - Use `KEY3` (increment hours) and `KEY2` (increment minutes).
-- **Alarm setting**:
-  - Controlled by `SW2`.
-  - Use `KEY3` (increment hours) and `KEY2` (increment minutes).
-  - While alarm is being set, current time continues running.
-- **Alarm trigger**:
-  - When current time = alarm time, **LED7** blinks until cleared.
-- **Alarm clear**:
-  - `KEY0` stops alarm and resets alarm time to `00:00`.
-- **Reset**:
-  - `SW0` resets both current time and alarm time to `00:00`.
-- **Speed-up mode**:
-  - `SW4` enables demo/debug mode (time runs ×120 faster).
-- **LED status**:
-  - `LED9` blinks once per second to indicate the clock is running.
-  - `LED7` blinks when alarm condition is active.
+```systemverilog
+module counter #(parameter int m = 13, parameter int b = $clog2(m)) ...
+```
 
----
+That one module, instantiated with the right modulus, is the whole design. A mod-3,000,000,000 counter rolls over once a minute at 50 MHz and drives a mod-10 minutes-ones counter. That rolls into a mod-6 minutes-tens counter, which rolls into a mod-24 hours counter. Seconds never exist as a value anywhere — the design just counts clock cycles until a minute has gone by.
 
-## 🎛️ Switch & Button Mapping
+Hours are stored as a plain 0–23 count and split into digits at the last moment, by comparing against 19 and 9 and subtracting 20 or 10. That's cheaper than carrying BCD around and it's only two comparators.
+
+The alarm is a second, completely parallel copy of the same counter chain that doesn't advance on its own — only when you're setting it. A comparator watches both chains, and when all four digits agree it sets a latch that drives `LED7`. `KEY0` clears the latch and resets the alarm back to 00:00.
+
+`SW4` is a demo mode that swaps the minute tick from the 1-minute counter to the half-second counter, running the clock 120× faster so you don't have to wait an hour to test the alarm.
+
+Button presses are gated on the half-second counter rolling over, which means a held key increments twice a second and a mechanical bounce can't register twice. It's a crude debounce, but for a clock it's the right one — you want a slow, deliberate repeat rate anyway.
+
+## Controls
 
 | Control | Function |
-|---------|----------|
-| `SW0` | Global reset (resets current + alarm time to 00:00). |
-| `SW1` | Current time set mode (freeze time, use keys to adjust). |
-| `SW2` | Alarm set mode (adjust alarm, time keeps running). |
-| `SW4` | 120× speed-up mode (minutes increment every 0.5 s). |
-| `KEY0` | Alarm clear button (stops LED7 blinking, resets alarm). |
-| `KEY2` | Increment minutes (in whichever mode is active). |
-| `KEY3` | Increment hours (in whichever mode is active). |
+|---|---|
+| `SW0` | Reset. Clears current time and alarm to 00:00. |
+| `SW1` | Set current time. The clock freezes while this is on. |
+| `SW2` | Set alarm. The clock keeps running underneath, and the display shows the alarm time. |
+| `SW4` | Demo mode — time runs 120× faster. |
+| `KEY0` | Silence the alarm and reset the alarm time to 00:00. |
+| `KEY2` / `KEY3` | Increment, in whichever mode is active. **See the note below — verify which is which on your board.** |
 
-⚠️ **Mutual exclusivity**:  
-- Only one of `SW1` / `SW2` should be active at a time.  
-- Only one of `KEY2` / `KEY3` should be pressed at a time.  
+`HEX3:HEX2` shows hours, `HEX1:HEX0` shows minutes. `LED9` blinks once a second so you can tell the clock is alive. `LED7` blinks when the alarm is going off.
 
----
+Only turn on one of `SW1` / `SW2` at a time, and only press one of `KEY2` / `KEY3` at a time. The logic explicitly requires the other to be inactive, so pressing both does nothing.
 
-## 🖥️ Display & Indicators
+## What's in here
 
-- **HEX3:HEX2** → Hours (00–23)  
-- **HEX1:HEX0** → Minutes (00–59)  
-- **LED9** → Blinks at 1 Hz while clock is active  
-- **LED7** → Blinks when alarm is triggered  
+| File | What it does |
+|---|---|
+| `alarm_clock.sv` | Everything — counter chains, set logic, digit splitting, alarm comparator, display muxing. |
+| `counter.sv` | Parameterized modulo counter. Takes the modulus, computes its own width. |
+| `ourDff.sv` | D flip-flop with synchronous reset and enable. |
+| `ourHex.sv` | BCD to seven-segment decoder. |
 
----
+## Running it
 
-## 📂 Repository Structure
+1. Open `alarm_clock.qpf` in Quartus Prime (built with 22.1).
+2. Compile and program the `.sof` onto a DE0-CV.
+3. Turn on `SW4` first — otherwise testing the alarm takes real time.
 
-| File | Description |
-|------|-------------|
-| `alarm_clock.sv` | Top-level module (integrates counters, control logic, HEX display, LEDs). |
-| `counter.sv` | Parameterized counter used for timekeeping. |
-| `ourHex.sv` | Hexadecimal-to-7-segment driver for displaying digits on HEX displays. |
-| `ourDff.sv` | Basic D flip-flop with reset (utility module). |
-| `alarm_clock.qpf` | Quartus project file. |
-| `alarm_clock.qsf` | Quartus settings + DE0-CV pin assignments. |
-| `c5_pin_model_dump.txt` | Cyclone V pin model reference. |
-| `Lab_3.pdf` | Original lab assignment and design specifications. |
+## Known rough edges
 
----
-
-## 🚀 Build & Run Instructions
-
-1. Open the project in **Quartus Prime Standard (22.1 or compatible)**.
-   - Load `alarm_clock.qpf`.
-2. Connect the **DE0-CV board** via USB-Blaster.
-3. Compile the project (`Ctrl+L` in Quartus).
-4. Program the FPGA with the generated `.sof` bitstream.
-5. Use the switches and keys to interact with the alarm clock:
-   - Set current/alarm times.
-   - Trigger and clear alarm.
-   - Test accelerated time with `SW4`.
-
----
-
-## 🐞 Troubleshooting
-
-- **No display on HEX** → Check pin assignments in `.qsf`.  
-- **LEDs not blinking** → Verify clock divider logic is running.  
-- **Time not incrementing** → Ensure main counter is enabled and reset is off.  
-- **Alarm not triggering** → Confirm `SW2` correctly sets alarm and comparator is working.  
-
----
-
-## 👤 Author
-
-FPGA project by **Benjamin Tung**.
+- **The `KEY2` / `KEY3` labels above may be backwards.** The DE0-CV's keys are active-low, but the set logic treats them as active-high (`KEY2 && !KEY3`), while `KEY0` is correctly handled as active-low. So the two halves of the design disagree about button polarity. The hardware behaves consistently either way — but confirm on the board which key actually does hours and which does minutes, and fix either the labels or the logic.
+- **The alarm can re-trigger at midnight.** Clearing it resets the alarm time to 00:00, so if the clock later reaches 00:00 the comparator matches again.
+- There's no seconds display and no way to set seconds — the minute counter starts wherever reset left it.
