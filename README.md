@@ -50,7 +50,7 @@ Digital timekeeping, alarm set/trigger/clear, and a demo mode, in SystemVerilog 
 
 1. Open `alarm_clock.qpf` in Quartus Prime 22.1
 2. Compile, program `.sof` to a DE0-CV
-3. Turn on `SW4` first, or testing the alarm takes real time
+3. For testing, turn on `SW4` first to run the alarm clock 120x faster
 
 ## Limitations
 
